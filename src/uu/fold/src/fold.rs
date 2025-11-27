@@ -5,34 +5,23 @@
 
 // spell-checker:ignore (ToDOs) ncount routput
 
-use clap::{Arg, ArgAction, Command};
-use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Read, Write, stdin, stdout};
-use std::path::Path;
+use std::io::{BufRead, BufReader, BufWriter, Read, Write, stdout};
+use clap::{CommandFactory};
 use unicode_width::UnicodeWidthChar;
-use uucore::display::Quotable;
-use uucore::error::{FromIo, UResult, USimpleError};
-use uucore::format_usage;
+use uucore::error::{FromIo, UResult};
 use uucore::translate;
+
+mod paths_or_stdin;
+mod args;
+
+use paths_or_stdin::PathsOrStdin;
+use args::{WidthMode};
+use args::Args;
 
 const TAB_WIDTH: usize = 8;
 const NL: u8 = b'\n';
 const CR: u8 = b'\r';
 const TAB: u8 = b'\t';
-
-mod options {
-    pub const BYTES: &str = "bytes";
-    pub const CHARACTERS: &str = "characters";
-    pub const SPACES: &str = "spaces";
-    pub const WIDTH: &str = "width";
-    pub const FILE: &str = "file";
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum WidthMode {
-    Columns,
-    Characters,
-}
 
 struct FoldContext<'a, W: Write> {
     spaces: bool,
@@ -46,95 +35,19 @@ struct FoldContext<'a, W: Write> {
 
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
-    let args = args.collect_lossy();
-
-    let (args, obs_width) = handle_obsolete(&args[..]);
-    let matches = uucore::clap_localization::handle_clap_result(uu_app(), args)?;
-
-    let bytes = matches.get_flag(options::BYTES);
-    let characters = matches.get_flag(options::CHARACTERS);
-    let spaces = matches.get_flag(options::SPACES);
-    let poss_width = match matches.get_one::<String>(options::WIDTH) {
-        Some(v) => Some(v.clone()),
-        None => obs_width,
-    };
-
-    let width = match poss_width {
-        Some(inp_width) => inp_width.parse::<usize>().map_err(|e| {
-            USimpleError::new(
-                1,
-                translate!("fold-error-illegal-width", "width" => inp_width.quote(), "error" => e),
-            )
-        })?,
-        None => 80,
-    };
-
-    let files = match matches.get_many::<String>(options::FILE) {
-        Some(v) => v.cloned().collect(),
-        None => vec!["-".to_owned()],
-    };
-
-    fold(&files, bytes, characters, spaces, width)
+    let args = Args::custom_parse();
+    //let args = Args::from_uucore_args(args);
+    let readers: PathsOrStdin = args.files.into();
+    fold(readers, args.bytes, args.characters, args.spaces, args.width)
 }
 
-pub fn uu_app() -> Command {
-    Command::new(uucore::util_name())
-        .version(uucore::crate_version!())
-        .help_template(uucore::localized_help_template(uucore::util_name()))
-        .override_usage(format_usage(&translate!("fold-usage")))
-        .about(translate!("fold-about"))
-        .infer_long_args(true)
-        .arg(
-            Arg::new(options::BYTES)
-                .long(options::BYTES)
-                .short('b')
-                .help(translate!("fold-bytes-help"))
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new(options::CHARACTERS)
-                .long(options::CHARACTERS)
-                .help(translate!("fold-characters-help"))
-                .conflicts_with(options::BYTES)
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new(options::SPACES)
-                .long(options::SPACES)
-                .short('s')
-                .help(translate!("fold-spaces-help"))
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new(options::WIDTH)
-                .long(options::WIDTH)
-                .short('w')
-                .help(translate!("fold-width-help"))
-                .value_name("WIDTH")
-                .allow_hyphen_values(true),
-        )
-        .arg(
-            Arg::new(options::FILE)
-                .hide(true)
-                .action(ArgAction::Append)
-                .value_hint(clap::ValueHint::FilePath),
-        )
+pub fn uu_app() -> clap::Command{
+    Args::command()
 }
 
-fn handle_obsolete(args: &[String]) -> (Vec<String>, Option<String>) {
-    for (i, arg) in args.iter().enumerate() {
-        let slice = &arg;
-        if slice.starts_with('-') && slice.chars().nth(1).is_some_and(|c| c.is_ascii_digit()) {
-            let mut v = args.to_vec();
-            v.remove(i);
-            return (v, Some(slice[1..].to_owned()));
-        }
-    }
-    (args.to_vec(), None)
-}
 
 fn fold(
-    filenames: &[String],
+    mut readers: PathsOrStdin,
     bytes: bool,
     characters: bool,
     spaces: bool,
@@ -142,17 +55,10 @@ fn fold(
 ) -> UResult<()> {
     let mut output = BufWriter::new(stdout());
 
-    for filename in filenames {
-        let filename: &str = filename;
-        let mut stdin_buf;
-        let mut file_buf;
-        let buffer = BufReader::new(if filename == "-" {
-            stdin_buf = stdin();
-            &mut stdin_buf as &mut dyn Read
-        } else {
-            file_buf = File::open(Path::new(filename)).map_err_context(|| filename.to_string())?;
-            &mut file_buf as &mut dyn Read
-        });
+    for reader in readers.readers()? {
+        let buffer = BufReader::new(
+            reader
+        );
 
         if bytes {
             fold_file_bytewise(buffer, spaces, width, &mut output)?;
