@@ -1,6 +1,7 @@
 use clap::Parser;
 use uucore::format_usage;
 use uucore::translate;
+use super::paths_or_stdin::PathOrStdin;
 
 #[derive(Parser)]
 #[command(
@@ -15,8 +16,9 @@ pub struct Args {
                 action = clap::ArgAction::Append,
                 hide = true,
                 value_hint = clap::ValueHint::FilePath,
+                value_parser = clap::builder::ValueParser::new(|s: &str| s.parse::<PathOrStdin>())
         )]
-        pub files: Vec<String>,
+        pub files: Vec<PathOrStdin>,
         #[arg(
                 action = clap::ArgAction::SetTrue,
                 help = translate!("fold-bytes-help"),
