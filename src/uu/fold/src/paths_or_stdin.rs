@@ -1,42 +1,62 @@
 use std::path::PathBuf;
-use std::io::{Read, stdin};
+use std::io::{Read, stdin, Stdin};
 use std::fs::File;
-use uucore::error::{UResult, FromIo};
+use std::str::FromStr;
+use uucore::error::{UResult, FromIo, UError};
 
-
-pub enum PathsOrStdin {
-        Paths(Vec<PathBuf>),
-        Stdin(std::io::Stdin)
+#[derive(Debug)]
+pub enum PathOrStdin {
+        Path(PathBuf),
+        Stdin(Stdin),
 }
 
-impl From<Vec<PathBuf>> for PathsOrStdin {
-        fn from(value: Vec<PathBuf>) -> Self {
-            if value.is_empty() {
-                Self::Paths(value)
+impl PathOrStdin {
+        pub fn as_readers<'a>(&'a self) -> UResult<Box<dyn Read + 'a>>  {
+                match self {
+                        Self::Path(pathbuf) => {
+                                File::open(pathbuf)
+                                .map_err_context(|| pathbuf.to_str().unwrap().to_string())
+                                .map(|file| Box::new(file) as Box<dyn Read>)
+                        },
+                        Self::Stdin(stdin) => {
+                                Ok(Box::new(stdin))
+                        }
+                }
+        }
+}
+
+impl FromStr for PathOrStdin {
+        type Err = Box<dyn std::error::Error>;
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            if s == "-" {
+                Ok(Self::Stdin(stdin()))
             } else {
-                Self::Stdin(stdin())
+                Ok(Self::Path(PathBuf::from_str(s)?))
+            }
+        }
+}
+
+pub struct PathsOrStdin(Vec<PathOrStdin>);
+
+impl TryFrom<Vec<String>> for PathsOrStdin {
+        type Error = Box<dyn std::error::Error>;
+        fn try_from(mut value: Vec<String>) -> Result<Self, Self::Error> {
+            value.remove(0);
+            if value.is_empty() {
+                Ok(Self(vec![PathOrStdin::Stdin(stdin())]))
+            } else {
+                let value = value
+                .into_iter()
+                .map(|x| PathOrStdin::from_str(&x))
+                .collect::<Result<Vec<_>, Self::Error>>()?;
+                Ok(Self(value))
             }
         }
 }
 
 impl PathsOrStdin {
-        pub fn readers<'a>(&'a mut self) -> UResult<Vec<Box<dyn Read + 'a>>>  {
-            match self {
-                Self::Paths(paths) => {
-                        let paths: UResult<Vec<_>> = paths
-                                .iter()
-                                .map(|path| {
-                                                File::open(path)
-                                                .map_err_context(|| path.to_str().unwrap().to_string())
-                                                .map(|file| Box::new(file) as Box<dyn Read>)
-                                        }
-                                )
-                                .collect();
-                        Ok(paths?)
-                },
-                Self::Stdin(stdin) => {
-                        Ok(vec![Box::new(stdin)])
-                }
-            }
+        pub fn as_readers<'a>(&'a mut self) -> UResult<Vec<Box<dyn Read + 'a>>>  {
+            let readers = self.0.iter().map(|reader| reader.as_readers()).collect::<UResult<Vec<_>>>()?;
+            Ok(readers)
         }
 }

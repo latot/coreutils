@@ -37,7 +37,7 @@ struct FoldContext<'a, W: Write> {
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
     let args = Args::custom_parse();
     //let args = Args::from_uucore_args(args);
-    let readers: PathsOrStdin = args.files.into();
+    let readers: PathsOrStdin = args.files.try_into().unwrap();
     fold(readers, args.bytes, args.characters, args.spaces, args.width)
 }
 
@@ -55,7 +55,7 @@ fn fold(
 ) -> UResult<()> {
     let mut output = BufWriter::new(stdout());
 
-    for reader in readers.readers()? {
+    for reader in readers.as_readers()? {
         let buffer = BufReader::new(
             reader
         );
