@@ -1,8 +1,6 @@
 use clap::Parser;
-use std::path::PathBuf;
 use uucore::format_usage;
 use uucore::translate;
-use super::paths_or_stdin::PathOrStdin;
 
 #[derive(Parser)]
 #[command(

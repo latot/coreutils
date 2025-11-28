@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::io::{Read, stdin, Stdin};
 use std::fs::File;
 use std::str::FromStr;
-use uucore::error::{UResult, FromIo, UError};
+use uucore::error::{UResult, FromIo};
 
 #[derive(Debug)]
 pub enum PathOrStdin {
